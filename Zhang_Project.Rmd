@@ -1,0 +1,884 @@
+---
+title: "DW project"
+author: "Wanjie Zhang"
+date: "4/29/2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(car)
+library(rlang)
+library(ggplot2)
+library(rvest)
+library(ggthemes)
+library(plotly)
+```
+
+
+#Introduction 
+Data science is one the most popular field of science and technology in 21st century, and data scientist is the hottest position in recent year due to today's information explosion. Someone have to manipulate these data efficiently and precisely. This report will discover the status of pre data scientist and real data scientist with different perspectives including education and employment, how they learned the data science skills and how they improve their knowledge. 
+
+#Bcakground
+The approaches used in this report are analyzing Kaggle ML and Data Science Survey of 2017 to get some insights of data scientist. Survey is divided into two response sheet, one is multiple choice sheet and the other one is free from sheet. The questions designed in this survey is to know the background of data scientist and their day to day work. I separate the dataset into two main group, one is students, who are planning to become data scientists in  the future, and the other one is real data scientist who implement their skills in the real world. Another data set , which includes universities having data science field major, is also used in this report to discuss whether the universities should open more data science major. 
+
+#Load Data
+```{r warning=FALSE}
+#data source 1: Kaggle ML and Data Science Survey, 2017
+freeformResponses = read.csv("freeformResponses.csv")
+multipleChoiceResponses = read.csv("multipleChoiceResponses.csv")
+schema = read.csv("schema.csv")
+conversionrates = read.csv("conversionRates.csv")
+
+#data source 2 
+#use table from website http://datascience.community/colleges
+```
+
+#Some Basic Analysis of Kaggle Survey
+```{r warning=FALSE}
+#total number of responses
+count1 = nrow(multipleChoiceResponses)
+print(paste0("Total number of responses:", count1))
+
+#total number of countries
+count2 = multipleChoiceResponses %>%
+  group_by(Country) %>%
+  summarise(count = n())%>%
+  arrange(desc(count))
+count3 = nrow(count2)  
+print(paste0("Total number of Countries with respondents:", count3))
+print("Country with highest respondents: United States with 4197 respondents")
+```
+
+
+# Writing functions 
+```{r warning=FALSE}
+#Function for single choice questions
+singlechoice = function(question, filteredData = multipleChoiceResponses){
+  filteredData %>%                      
+  filter(!UQ(sym(question)) == "") %>%  
+  group_by_(question) %>%               
+  summarise(count = n()) %>%            
+  mutate(percent = (count / sum(count)) * 100) %>%   
+  arrange(desc(count))                  
+}
+
+# Function for multi choice questions
+multiplechoice = function(question, filteredData = multipleChoiceResponses){
+  filteredData %>%                      
+  filter(!UQ(sym(question)) == "") %>%         
+  select(question) %>%                      
+  mutate(totalCount = n()) %>%                 # Add a column with the initial number of respondents to question
+  mutate(selections = strsplit(as.character(UQ(sym(question))), '\\([^)]+,(*SKIP)(*FAIL)|,\\s*', perl = TRUE)) %>%   # Split multiple answers apart at the comma, but ignore commas inside parentheses
+  unnest(selections) %>%                        # Split answers are now nested, need to unnest them
+  group_by(selections) %>%                      # Group by the selected responses to the question
+  summarise(totalCount = max(totalCount), count = n()) %>%              
+  mutate(percent = (count / totalCount) * 100) %>%  
+  arrange(desc(count))                        
+}
+```
+
+#Data Exploration - The Distribution of Respondents' Countries
+```{r warning=FALSE }
+country = singlechoice("Country")
+country = country %>% head(20)
+country_plot = ggplot(country, aes(x = reorder(Country, count), count, fill = Country, alpha = 0.5)) + geom_bar(stat = "identity", width = 0.5) + coord_flip() + xlab("Country") + ylab("Number of Respondents")
+country_plot
+```
+Kaggle users of USA and India, constitute maximum respondents, about 1/3 of the total.
+
+#Data Exploration - The Distribution of Respondents' Gender 
+```{r warning=FALSE}
+gender = singlechoice("GenderSelect")
+
+gender_plot = ggplot(gender, aes(x = reorder(GenderSelect, count), count, fill = GenderSelect)) + 
+  geom_bar(stat = "identity", width = 0.5) + 
+  scale_fill_brewer(type = "seq", palette = "Accent")  +
+  xlab("Gender") + 
+  ylab("Number of Respondents") +
+  theme(axis.text.y= element_text(angle=45, vjust=0.5, size=6)) +
+  theme(axis.text.x = element_text(angle=10, vjust=0.5, size=6)) 
+
+gender_plot
+```
+Unsurprisingly, the male kaggle users counts a huge amount of respondents in this survey. And we can conclude that most of kaggle users are male.
+
+#Data Exploration - The Distribution of Respondents' Age
+```{r, warning=FALSE}
+multipleChoiceResponses$Age = as.numeric(as.character(multipleChoiceResponses$Age))
+age = singlechoice("Age") %>%
+  filter(!Age <1 ) # remove unreasonable age 
+
+age_info = multipleChoiceResponses %>%
+  filter(!Age == "") %>%
+  select(Age)
+
+
+g = ggplot(age_info, aes(x = Age, color = "blue")) +
+  geom_histogram(aes(y = ..density..), alpha = 0.7, fill = "#333333") +
+  xlab("Age (years)") +
+  ylab("Number of Respondents") +
+  geom_density(alpha = 0.2, color = "black") +
+  scale_fill_hue(l = 45) + theme_economist() + scale_fill_economist()
+ggplotly(g)
+```
+It is interesting to see that people who's age is 25 have high involvement in kaggle, since I am age 25， which makes me wonder what are the employment and education status of kaggle users who's age is 25. 
+ 
+#Data Exploration - Enployment Status of Respondents who is age 25
+```{r,warning=FALSE }
+age25 = multipleChoiceResponses %>% 
+  filter( Age == 25 ) %>%
+  select(EmploymentStatus, StudentStatus, CurrentJobTitleSelect)
+
+age25_employment = age25 %>%
+  group_by(EmploymentStatus)%>%
+  summarise(count = n()) %>%
+  mutate(percent = (count / sum(count)) *100) %>%
+  arrange(desc(count))
+
+age25_employment_plot = plot_ly(age25_employment, labels = ~EmploymentStatus, values = ~count, type = 'pie',
+            textposition = 'inside',
+        textinfo = 'label+percent',
+        insidetextfont = list(color = '#FFFFFF')) %>%
+  layout(title = 'Employment Status of Respondents Who are 25',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+age25_employment_plot
+
+age25_jobtitle = age25 %>%
+  group_by(CurrentJobTitleSelect)%>%
+  summarise(count = n()) %>%
+  mutate(percent = (count / sum(count)) *100) %>%
+  arrange(desc(count)) 
+
+age25_jobtitle_plot = plot_ly(age25_jobtitle, labels = ~CurrentJobTitleSelect, values = ~count, type = 'pie',
+            textposition = 'inside',
+        textinfo = 'label+percent',
+        insidetextfont = list(color = '#FFFFFF')) %>%
+  layout(title = 'Job Titles of Respondents Who are 25',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+age25_jobtitle_plot
+```
+From the two pie charts here, we can see that 61.2% of respondents who are 25 are emoloyed full time, and 14.8% of them are data scientist, which counts the most in the pie chart. It is reasonable since it's a data science survey. 
+
+#Data Exploration - Age
+```{r }
+# median age
+agemedian = age_info %>%
+  summarise(median = median(Age, na.rm = TRUE), sd = sd(Age, na.rm = TRUE))
+agemedian
+#make sense for data scientist
+```
+I also looked up the median age of respondents, the median is 30 and the standard deviation is around 10. My guess is that the data scientist position need year's experience to achieve, at the mean time, young generations who have great talent want to get aboard  as well.
+
+
+#Data Exploration - Age Distribution by Gender
+```{r warning=FALSE}
+#Age by Gender 
+agegender <- multipleChoiceResponses %>% 
+  group_by(GenderSelect, Age) %>%
+  filter(!GenderSelect == "") %>% 
+  filter(!Age == "")
+
+gg = ggplot(agegender, aes(x = Age, fill = GenderSelect)) + 
+  geom_density(alpha= 0.5, position ="stack") + 
+  facet_wrap(~GenderSelect) 
+gg
+```
+The plots show that the age of female and male responents have similar distribution, but non-bianry gender has wider age distribution. Even the number of female and male kaggle user are quite different, the age of these people who paticipated in kaggle are similar. 
+
+#Data Exploration - Age Distribution by Countries 
+```{r warning=FALSE}
+#Age by top 10 Country
+
+top10 = country [1:10, ] %>% mutate(Country = as.character(Country))
+top10list = top10$Country
+
+top10age = multipleChoiceResponses %>%
+  filter( Country %in% top10list)%>%
+  filter( Age >1, !is.na(Age)) %>%
+  filter(!Age == "") %>%
+  group_by(Country, Age)
+
+pp = ggplot(top10age, aes(x = Age, fill = Country)) + 
+  geom_density(alpha= 1, position = "stack") + 
+  facet_wrap(~Country) 
+ggplotly(pp)
+```
+Chinese user are younger than users from other Kaggle-heavy country.
+
+
+#Data Exploration - Employment Status of All Respondents 
+```{r warning=FALSE}
+# since we discuss job a bit above, I want to discover more here
+overall_job = singlechoice("EmploymentStatus")
+overall_jobplot = overall_job %>%
+  plot_ly(labels = ~EmploymentStatus, values = ~count,
+          textposition = 'outside',
+        textinfo = 'label+percent',
+        alpha = 0.5) %>%
+  add_pie(hole = 0.6) %>%
+  layout(title = "Employment Status of All Respondents",  showlegend = F,
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+overall_jobplot
+```
+65.2% of respondents are full-time employed, but I am curious about respondents who are not employed, what are they doing? 
+
+#Data Exploration - Employment Status - Non-Worker
+```{r }
+#non-worker
+#This question was only shown to people that indicated that they were Not employed, and not looking for work, 
+#Not employed, but looking for work, or I prefer not to say
+student = singlechoice("StudentStatus")
+student
+
+#this question was only shown to people who indicate they are not employed 
+student_learning = singlechoice("LearningDataScience")
+student_learning
+```
+My first guess is that some of the respondents who are not employed are students, just like me. Around 76% of these people are students, and 62% of students focus on learning data science skills, which also implys that besides the real data science field workers, data science students are major user of kaggle website for improving data science skills. 
+
+#Data Exploration - Age Distribution of Students
+```{r }
+#age distribution 
+student_age = multipleChoiceResponses %>%
+  filter(StudentStatus == "Yes") %>%
+  filter( Age >1, !is.na(Age)) %>%
+  filter(!Age == "") %>%
+  select(Age)
+
+#the distribution plot make sense, but I still noteice that there are still some people might take education 
+#again after years' working
+ggg = ggplot(student_age, aes(x = Age, color = "blue")) +
+  geom_histogram(aes(y = ..density..), alpha = 0.7, fill = "#333333") +
+  xlab("Age (years)") +
+  ylab("Number of Student Respondents") +
+  geom_density(alpha = 0.2, color = "black") +
+  scale_fill_hue(l = 45) + theme_economist() + scale_fill_economist()
+ggplotly(ggg)
+
+```
+Most of students are age under 25, but I still noticed that some students are older. It is possible that they take education again after years' working for changing of their career or improving analytic skills.
+
+#Data Exploration - Past Employment of Students
+```{r }
+# student past job
+student_pastjob = multipleChoiceResponses %>%
+  filter(StudentStatus == "Yes") %>%
+  filter(!PastJobTitlesSelect == "") %>%
+  filter(!PastJobTitlesSelect == "I haven't started working yet") %>%
+  select(Age, PastJobTitlesSelect,LearningDataScience) 
+
+student_pastjob = data.frame(student_pastjob)
+print(paste0("The number of students who have previous job is: ", nrow(student_pastjob)))
+
+```
+The result shows that 419 students who have previous job which coulbe be full- time or intern. My next part is to discover the possibility that student who have previous full-time or part-time job now turning their career into data science filed by taking college course and gaining a new higher degree. The reason why this question came up to my mind is I had previous job that not realated to data no turning my direction to data science. 
+
+
+#Data Exploration - Past Employment and Education of Students
+```{r }
+# is the students who have past job which somehow related to "data science"? I exclude business analyst, 
+# computer scientist, software developer, programmer. 
+# is the students who have past job now focus on learning data science skills?
+student_pastjob$PastJobTitlesSelect = as.character(student_pastjob$PastJobTitlesSelect)
+student_pastjob$LearningDataScience  = as.character(student_pastjob$LearningDataScience)
+pattern1 = "Data"
+pattern2 = "mostly"
+student_ds = student_pastjob %>% 
+  mutate(past.is.data = str_detect(PastJobTitlesSelect, pattern1)) %>%
+  mutate(focus.ds = str_detect(LearningDataScience, pattern2)) 
+#past ds
+past_data_count = student_ds %>%
+  group_by(past.is.data) %>%
+  summarize(count = n()) %>%
+  mutate(pct = prop.table(count) *100)
+
+past_data_plot = ggplot(past_data_count, aes(x = past.is.data, y = pct, fill = past.is.data)) +
+  geom_bar(stat = "identity", width = 0.5) + coord_flip() +
+  geom_text(aes(y = pct + .5,    # nudge above top of bar
+                label = paste0(pct, '%')),    # prettify
+              position = position_dodge(width = .9), 
+              size = 3)
+
+past_data_plot
+
+# focus ds
+learn_ds_count = student_ds %>%
+  group_by(focus.ds) %>%
+  summarize(count = n()) %>%
+  mutate(pct = prop.table(count) *100)
+
+learn_ds_plot = ggplot(learn_ds_count, aes(x = focus.ds, y = pct, fill = focus.ds)) +
+  geom_bar(stat = "identity", width = 0.5) + coord_flip() +
+  geom_text(aes(y = pct + .5,    # nudge above top of bar
+                label = paste0(pct, '%')),    # prettify
+              position = position_dodge(width = .9), 
+              size = 3)
+
+learn_ds_plot
+
+
+```
+For the previous job analysing, I exclude business analyst, computer scientist, software developer and programmer because I consider these job pisitions which might have similar skills with data scientist, still want to gain more data science knowledge through college. These two bar charts imply 63% of students' past jobs are not direct data analysing position, but now 66% of students focus on data science learning. 
+
+#Data Exploration - Employment Status - Worker
+```{r }
+#workers
+#Do you write code to analyze data in your current job, freelance contracts, or most recent job if retired?
+#This question was only shown to people that indicated that they were Employed full-time, Employed part-time, Independent contractor, freelancer, or self-employed, or retired
+code_writer = singlechoice("CodeWriter")
+
+#For the 3033 users that answered “No” on the above question they were further asked whether or not they were planning to switch careers to data science.
+#Are you actively looking to switch careers to data science?
+careerswitch = singlechoice("CareerSwitcher")
+#70% of the employed Kaggle users that don’t currently write code in their job are planning to switch into a data science field.
+
+#what are these people's current jobs?
+career_no_code = multipleChoiceResponses %>%
+  filter(CodeWriter == "No") %>%
+  filter(CareerSwitcher == "Yes") %>%
+  select(CodeWriter, CareerSwitcher, CurrentJobTitleSelect, CurrentEmployerType) %>%
+  head(4)
+career_no_code
+#it looks weired, the positions here should do some coding.....
+
+career_no_code_count = career_no_code %>%
+  filter(!CurrentEmployerType == "") %>%
+  group_by(CurrentEmployerType) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+#it seems that some company that provide analytics postition but do not perform advanced analytics. 
+# for further study, I want to exclud these people since didn't do any real data analysing job.
+
+new_multi_choice_sheet = multipleChoiceResponses %>%
+  filter(CodeWriter == "Yes")
+current_job = new_multi_choice_sheet %>%
+  filter(!CurrentJobTitleSelect == "") %>%
+  group_by(CurrentJobTitleSelect) %>%
+  summarize(count = n()) %>%
+  mutate(percent = (count / sum(count)) * 100) %>%   
+  arrange(desc(count))
+
+# 
+
+real_data_scientist = new_multi_choice_sheet %>%
+  filter(CurrentJobTitleSelect %in% c("Data Scientist", 
+                                      "Software Developer/Software Engineer",
+                                      "Machine Learning Engineer",
+                                      "Data Analyst",
+                                      "Computer Scientist",
+                                      "Predictive Modeler",
+                                      "Data Miner") )
+```
+Now I start analyzing respondents who are currently employed. From the table above, there are some confusions here, some of respondents currently have a tech position but they are not code writer, I want to exclude these people because they might mistakenly choose the wrong choice or their job is not tech enough. Around 56% of Kaggle user who are code writer are data scientist, software developer/software engineer , machine learning engineer, data analyst, data Miner, predictive modeler and Computer scientist . I want to consider these 56% people are real data scientist or have similar skills to do further analyzing 
+
+
+#Data Exploration - Education and Employment status of Data Scientist I defined above
+# Write funciton for new data set 
+```{r , warning=FALSE}
+singlechoice2 = function(question, filteredData = real_data_scientist){
+  filteredData %>%                      
+    filter(!UQ(sym(question)) == "") %>%  
+    group_by_(question) %>%               
+    summarise(count = n()) %>%            
+    mutate(percent = (count / sum(count)) * 100) %>%   
+    arrange(desc(count))                  
+}
+
+# Function for multi choice questions
+multiplechoice2 = function(question, filteredData = real_data_scientist){
+  filteredData %>%                      
+    filter(!UQ(sym(question)) == "") %>%         
+    select(question) %>%                         
+    mutate(totalCount = n()) %>%                 # Add a column with the initial number of respondents to question
+    mutate(selections = strsplit(as.character(UQ(sym(question))), '\\([^)]+,(*SKIP)(*FAIL)|,\\s*', perl = TRUE)) %>%   # Split multiple answers apart at the comma, but ignore commas inside parentheses
+    unnest(selections) %>%                        # Split answers are now nested, need to unnest them
+    group_by(selections) %>%                      
+    summarise(totalCount = max(totalCount), count = n()) %>%              
+    mutate(percent = (count / totalCount) * 100) %>%  
+    arrange(desc(count))                        
+}
+```
+
+#Data Exploration - Education of Data Scientist 
+```{r warning=FALSE}
+tenure = singlechoice2("Tenure")
+#55% of these people have been writing data analysis code for between 1 to 5 years
+tenure_plot = tenure %>%
+  plot_ly(labels = ~Tenure, values = ~count,
+          textposition = 'outside',
+        textinfo = 'label+percent',
+        alpha = 0.5) %>%
+  add_pie(hole = 0.6) %>%
+  layout(title = "Code Writing Time of Data Scientist", showlegend = F,
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+tenure_plot
+
+formal_education = singlechoice2("FormalEducation")
+formal_education_plot = formal_education %>%
+  plot_ly(labels = ~FormalEducation, values = ~count,
+          textposition = 'outside',
+        textinfo = 'label+percent',
+        alpha = 0.5) %>%
+  add_pie(hole = 0.6) %>%
+  layout(title = "Formal Education of Data Scientist",  showlegend = F,
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+formal_education_plot
+
+
+
+major_select = singlechoice2("MajorSelect")
+major_select_plot = ggplot(major_select, aes(x = reorder(MajorSelect, count), count, fill = MajorSelect, alpha = 0.5)) + geom_bar(stat = "identity", width = 0.5)  + xlab("Major Select") + ylab("Number of Respondents") + ggtitle("Major of Data Scientist") + 
+  theme(axis.text.x= element_text(angle=10, vjust=0.5, size=6)) 
+  
+
+major_select_plot
+```
+Around 55% of these people have been writing data analysis code for between 1 to 5 years
+Around 91% of  data scientist or have similar skills have a bachelor's degree or higher level of formal education.
+Around 70% of these people majored in a math or computer oriented field.
+
+
+#Data Exploration - Education of Data Scientist 
+```{r }
+singlechoice2("FirstTrainingSelect")
+#it surprised me taht 56.7% of these people trained from online course and self-taught instead of University
+# course. Because there are not a lot of school have data science major until 2010?
+
+training <- real_data_scientist %>% 
+  # Keep only the columns that start with "LearningCategory" and don't include "FreeForm"
+  select(starts_with("LearningCategory"), -contains("FreeForm")) %>% 
+  purrr::set_names(c("Self-taught", "Online Courses", "Work", "University Lecture", "University Practical Course", "Other")) %>% 
+  # Re-structure the data
+  gather(key = response, value = percent) %>% 
+  filter(!is.na(percent)) %>% 
+  mutate(percent = as.numeric(percent))
+
+ggplot(training, aes(x = percent, fill = response)) + 
+  geom_histogram(bins = 10) + 
+  facet_wrap(~response) + 
+  ylab("Responses of a given percentage")
+# online course and self-teaching have the widest range of percentage 
+```
+From the table above, we can see that only 30% of data scientist got first train from universities. Also from the bar chat above, university course have the most data scientist choose to be 0 % as their learning category.  There are several reason could cause this phenomenon, for example, there are not a lot universities have data science related field major. 
+
+#Data Exploration - Learning Platform of Data Scientist 
+```{r }
+#where did they learn from??
+multiplechoice2("LearningPlatformSelect") %>% head(5)
+```
+60% of data scientist select Kaggle as a learning platform. Do universities need to open more data science major??
+
+# New Dataset
+# Colleges or Universities Which Have Data Science Related Major 
+```{r warning=FALSE}
+# Do universities need to open more data science major??
+# To answer this question, I scarped a dataset from a website called data science community 
+library(dplyr)
+library(stringr)
+url = "http://datascience.community/colleges"
+college_tables =
+  url %>%
+  read_html() %>%
+  html_nodes("table") %>%
+  html_table(fill = TRUE)
+college = college_tables[[2]]
+
+nrow(college)
+
+
+#what kind of degree do they provide? 
+collegeinfo = college %>%
+  group_by(Degree) %>%
+  summarise(count = n()) %>%
+  mutate(percent = (count / sum(count)) * 100) %>% 
+  arrange(desc(count))
+
+p3 <- collegeinfo %>% plot_ly(
+  x = ~Degree,
+  y = ~count,
+  name = "Number of Degrees College Provided Worldwide",
+  type = "bar"
+)
+
+p3
+```
+There are 581 data science related program in the world (We have duplicate universities because some universities have more than one degree related to data science) and 83% of these school provide bachelor or higher degree. 
+It's a small number of data science program since we have so many school in the world, but the data might not be up to date. 
+
+#Data Exploration - Employment status of Data Scientist
+```{r }
+multiplechoice2("CurrentEmployerType")%>%head(5)
+
+
+bb = multiplechoice2("PastJobTitlesSelect")%>%head(5)
+#it might be interesting to see what titles job they were coming from and what they changed to 
+
+jobchange <- real_data_scientist %>% 
+  filter(!PastJobTitlesSelect == "") %>% 
+  filter(!CurrentJobTitleSelect == "") %>% 
+  select(c("PastJobTitlesSelect", "CurrentJobTitleSelect")) %>% 
+  mutate(PastJobTitlesSelect = strsplit(as.character(PastJobTitlesSelect), ",")) %>% 
+  unnest(PastJobTitlesSelect) %>% 
+  mutate(CurrentJobTitleSelect = strsplit(as.character(CurrentJobTitleSelect), ",")) %>% 
+  unnest(CurrentJobTitleSelect) %>% 
+  group_by(PastJobTitlesSelect, CurrentJobTitleSelect) %>% 
+  summarise(count = n()) %>% 
+  filter(!PastJobTitlesSelect == CurrentJobTitleSelect) %>% 
+  ungroup() %>% 
+  arrange(desc(count)) %>% 
+  mutate(row = row_number()) %>% 
+  filter(row <= 20) %>% 
+  rename(From = PastJobTitlesSelect, To = CurrentJobTitleSelect)
+jobchange = jobchange%>%head(5)
+jobchange
+```
+Now, I want to discover more information of data scientists'' employment status. From the first chart, 32% of these people employed by a companies that perform advanced analytics  and 25.9% of these people employed by professional services / consulting firm. 
+Since data scientist is a new and hot job position in 21 century, I'd love to see that how many people change their career to data science. it's easy to understand that people have past job related in math, statistics or computer science field changed career to data science.
+
+#Career to data science 
+#Potential reason that people change career direction
+```{r }
+#How has your salary/compensation changed in the past 3 years? - Selected Choice
+salary_change = singlechoice2("SalaryChange")%>%head(5)
+#56.8% of these people have salary increased between 6% to 20% or more.
+salary_change_plot = salary_change %>%
+  plot_ly(labels = ~SalaryChange, values = ~count,
+          textposition = 'outside',
+        textinfo = 'label+percent',
+        alpha = 0.5) %>%
+  add_pie(hole = 0.6) %>%
+  layout(title = "Salary Change in The Past 3 Years",  showlegend = F,
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+salary_change_plot
+```
+56.8% of these people have salary increased between 6% to 20% or more in the past 3 years. It is a positive sign for data scientist, and high compensation could attract people who have similar skills and knowledge change career path to data science. 
+
+#Data Exploration - Employment status of Data Scientist. 
+#Compensation
+```{r warning=FALSE }
+reportedSalary = real_data_scientist %>% 
+  select(c("CompensationAmount", "CompensationCurrency", "FormalEducation", "WorkToolsSelect", "CurrentJobTitleSelect", "GenderSelect")) %>% 
+  filter(!CompensationCurrency == "") %>% 
+  filter(!CompensationAmount == "")
+
+salaryUSD = left_join(reportedSalary, conversionrates, by = c("CompensationCurrency" = "originCountry")) %>%
+  mutate(CompensationAmount = as.character(CompensationAmount),
+         originalSalary = as.numeric(gsub(",", "", CompensationAmount)),
+    usSalary = originalSalary * exchangeRate,
+    usSalary = as.numeric(format(round(usSalary, 2), nsmall = 2, scientific = FALSE)))
+salaryUSD  = salaryUSD %>%
+  filter(usSalary<1000000)
+```
+
+#Salary by Gender
+```{r warning=FALSE}
+p5 = plot_ly(salaryUSD, y = ~usSalary, color = ~GenderSelect, type = "box") # + layout(title = "Salary by Gender of Data Scientist")
+p5
+```
+Even the female and male data scientist have similar median salary, but male data scientist has the widest range of salay. It is easy to understand since most of data scientist are male.
+
+#Salary by Job Title
+```{r warning=FALSE}
+p6 = plot_ly(salaryUSD, y = ~usSalary, color = ~CurrentJobTitleSelect, type = "box") #+ layout(title = "Salary by Job Title of Data Scientist")
+p6
+```
+Data scientist have highest median salary, and computer scientist and data scientist have the widest range of salary. 
+
+#Salary by Education
+```{r warning=FALSE}
+p7 = plot_ly(salaryUSD, y = ~usSalary, color = ~FormalEducation, type = "box") 
+p7
+```
+The doctoral degree has the highest median salary, but the bachelor's degree has the widest range of salary.
+
+#Work Algorithms Selected
+```{r }
+# At work, which algorithms/analytic methods do you typically use? (Select all that apply) - Selected Choice
+work_a = multiplechoice2("WorkAlgorithmsSelect") %>%head(5)
+work_a
+p10 <- work_a %>% plot_ly(
+  x = ~selections,
+  y = ~count,
+  name = "Work Algorithms Selected by Data Scientists",
+  type = "bar"
+)
+
+p10
+```
+
+#Work Tools Selected
+```{r warning=FALSE}
+#For work, which data science/analytics tools, technologies, and languages have you used in the past year? (Select all that apply) - Selected Choice
+multiplechoice2("WorkToolsSelect") %>% head(5)
+
+#work_tools_frequency
+# Create list of possible tools
+tools = schema %>% 
+  filter(grepl("At work, how often did you use the following", Question, fixed = TRUE)) %>%
+  # Remove any columns that contain the word "Other"
+  filter(!grepl("Other", Question, fixed = TRUE)) %>%
+  mutate(response = strsplit(as.character(Question), " - ")) %>% 
+  unnest(response) %>% 
+  filter(!grepl("At work, how often did you use the following", response, fixed = TRUE)) %>% 
+  select(-2)
+
+# Create data frame of question Number and frequency response
+toolNames = real_data_scientist %>% 
+  select(starts_with("WorkToolsFrequency"), -contains("FreeForm")) %>% 
+  gather(key = response, value = frequency) %>% 
+  filter(!frequency == "")
+
+
+toolNamesChar <- left_join(toolNames, tools, by = c("response" = "Column")) %>% 
+  group_by(response.y, frequency) %>% 
+  summarise(count = n()) %>% 
+  mutate(frequency = factor(frequency, levels = c("Rarely", "Sometimes", "Often", "Most of the time"), ordered = TRUE))  %>%
+  filter(sum(count) > 1500,
+         !is.na(response.y)) %>%
+  ungroup()
+
+
+# Plot
+ggplot(toolNamesChar, aes(x = frequency, y = count, fill = response.y)) + 
+  geom_bar(stat = "identity") + 
+  facet_wrap(~response.y) + 
+  ylab("Number of times a response was selected") + 
+  theme(legend.position="none") +
+  theme(axis.text.x = element_text(angle = 90, 
+                                   vjust = 0.5, 
+                                   hjust = 1))
+```
+The bar plot shows that python and SQL have the highest working frequency during work.
+
+#Work Methods Selected 
+```{r }
+#For work, which data science/analytics tools, technologies, and languages have you used in the past year? (Select all that apply) - Selected Choice
+multiplechoice2("WorkMethodsSelect") %>% head(5)
+```
+Logistic regression has high selectance in both work method and work algorithms selection. Data visualization seems also very important during work. 
+
+#Work Methods - Visualization Percentage of A Project 
+```{r }
+singlechoice2("WorkDataVisualizations")
+```
+
+#Wroking time spend
+```{r }
+timespend = real_data_scientist %>%
+  select(starts_with("Time"), -contains("Other"), -ends_with("Studying")) %>% 
+  purrr::set_names(c("Gathering and Cleaning Data", "Model Building and Selection", "Putting Work into Production", "Visualizing Data", "Finding Insights in the Data and Communicating these to Relevant Stakeholders")) %>% 
+  gather(key = response, value = percent) %>% 
+  mutate(percent = as.numeric(percent)) %>% 
+  filter(!is.na(percent),
+         percent < 100) 
+# Plot
+ggplot(timespend, aes(x = percent, fill = response)) + 
+  geom_histogram(bins = 10) + 
+  facet_wrap(~response) + 
+  ylab("Responses of a given percentage") + 
+  theme(legend.position="none")
+```
+
+
+
+#Python and R Comparison. Captain America vs Ironman
+```{r }
+singlechoice2("LanguageRecommendationSelect") %>% head(2)
+
+```
+Python win
+
+#Data Exploration - Python and R Comparison. Captain America vs Ironman
+```{r }
+# languageRecommendataion by Python user 
+bypython = real_data_scientist %>% 
+  filter(!WorkToolsSelect == "") %>% 
+  filter(!LanguageRecommendationSelect == "") %>% 
+  select(c("WorkToolsSelect", "LanguageRecommendationSelect")) %>% 
+  mutate(Py = ifelse(grepl("Python", WorkToolsSelect) == TRUE & grepl("R", WorkToolsSelect) == FALSE, TRUE, FALSE)) %>% 
+  filter(Py == TRUE) %>% 
+  rename(Used = WorkToolsSelect, Recommended = LanguageRecommendationSelect) %>% 
+  group_by(Recommended) %>% 
+  summarise(count = n()) %>% 
+  mutate(percent = (count / sum(count)) * 100) %>% 
+  arrange(desc(count))
+
+bypython_plot = bypython %>%
+  plot_ly(labels = ~Recommended, values = ~count,
+          textposition = 'outside',
+        textinfo = 'label+percent',
+        alpha = 0.5) %>%
+  add_pie(hole = 0.3) %>%
+  layout(title = "Language Recommended by Python User",  showlegend = F,
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+bypython_plot
+
+#language Recommendation by R user 
+byr = real_data_scientist %>% 
+  filter(!WorkToolsSelect == "") %>% 
+  filter(!LanguageRecommendationSelect == "") %>% 
+  select(c("WorkToolsSelect", "LanguageRecommendationSelect")) %>% 
+  mutate(R = ifelse(grepl("Python", WorkToolsSelect) == FALSE & grepl("R", WorkToolsSelect) == TRUE, TRUE, FALSE)) %>% 
+  filter(R == TRUE) %>% 
+  rename(Used = WorkToolsSelect, Recommended = LanguageRecommendationSelect) %>% 
+  group_by(Recommended) %>% 
+  summarise(count = n()) %>% 
+  mutate(percent = (count / sum(count)) * 100) %>% 
+  arrange(desc(count))
+
+byr_plot = byr %>%
+  plot_ly(labels = ~Recommended, values = ~count,
+          textposition = 'outside',
+        textinfo = 'label+percent',
+        alpha = 0.5) %>%
+  add_pie(hole = 0.3) %>%
+  layout(title = "Language Recommended by R User",  showlegend = F,
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+byr_plot
+
+#language recommended by both user 
+byboth <- real_data_scientist %>% 
+  filter(!WorkToolsSelect == "") %>% 
+  filter(!LanguageRecommendationSelect == "") %>% 
+  select(c("WorkToolsSelect", "LanguageRecommendationSelect")) %>% 
+  mutate(both = ifelse(grepl("Python", WorkToolsSelect) == TRUE & grepl("R", WorkToolsSelect) == TRUE, TRUE, FALSE)) %>% 
+  filter(both == TRUE) %>% 
+  group_by(LanguageRecommendationSelect) %>% 
+  summarise(count = n()) %>% 
+  mutate(percent = (count / sum(count)) * 100) %>% 
+  arrange(desc(count)) %>% 
+  filter(percent > 20)
+
+byboth_plot = bypython %>%
+  plot_ly(labels = ~Recommended, values = ~count,
+          textposition = 'outside',
+        textinfo = 'label+percent',
+        alpha = 0.5) %>%
+  add_pie(hole = 0.3) %>%
+  layout(title = "Language Recommended by Both User",  showlegend = F,
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+byboth_plot
+```
+
+
+#Python and R Comparison. Captain America vs Ironman
+```{r }
+#Seperate data 
+bothuser = real_data_scientist %>% 
+  filter(!WorkToolsSelect == "") %>% 
+  filter(!LanguageRecommendationSelect == "") %>% 
+  select(c("WorkToolsSelect", "LanguageRecommendationSelect", "CompensationAmount", 
+           "CurrentJobTitleSelect", "JobFunctionSelect", "Tenure", "EmployerIndustry", "WorkToolsSelect")) %>% 
+  mutate(both = ifelse(grepl("Python", WorkToolsSelect) == TRUE & grepl("R", WorkToolsSelect) == TRUE, TRUE, FALSE)) %>% 
+  filter(both == TRUE) %>%
+  mutate(user = "both")
+bothuser = select(bothuser, -both)
+
+ruser = real_data_scientist %>% 
+  filter(!WorkToolsSelect == "") %>% 
+  filter(!LanguageRecommendationSelect == "") %>% 
+  select(c("WorkToolsSelect", "LanguageRecommendationSelect","CompensationAmount", 
+           "CurrentJobTitleSelect", "JobFunctionSelect", "Tenure", "EmployerIndustry", "WorkToolsSelect")) %>% 
+  mutate(R = ifelse(grepl("Python", WorkToolsSelect) == FALSE & grepl("R", WorkToolsSelect) == TRUE, TRUE, FALSE)) %>% 
+  filter(R == TRUE) %>%
+  mutate(user = "r")
+ruser = select(ruser, -R)
+
+pythonuser = real_data_scientist %>% 
+  filter(!WorkToolsSelect == "") %>% 
+  filter(!LanguageRecommendationSelect == "") %>% 
+  select(c("WorkToolsSelect", "LanguageRecommendationSelect", "CompensationAmount", 
+           "CurrentJobTitleSelect", "JobFunctionSelect", "Tenure", "EmployerIndustry", "WorkToolsSelect")) %>% 
+  mutate(Py = ifelse(grepl("Python", WorkToolsSelect) == TRUE & grepl("R", WorkToolsSelect) == FALSE, TRUE, FALSE)) %>% 
+  filter(Py == TRUE) %>% 
+  mutate(user = "python")
+
+pythonuser = select(pythonuser, -Py)
+```
+
+
+#Python and R Comparison. Captain America vs Ironman
+#Language Used by Professional
+```{r warning = FALSE}
+newdata2 = rbind(ruser,pythonuser)
+language_job = newdata2 %>%
+  group_by(CurrentJobTitleSelect, user) %>%
+  summarise(count = n())
+language_job_plot = ggplot(language_job, aes(x = CurrentJobTitleSelect, y = count, group = user, fill = user)) + 
+  geom_bar(position="dodge", stat="identity") +
+  coord_flip() + scale_fill_brewer(type = "seq", palette = "palred")
+language_job_plot
+```
+
+#Python and R Comparison. Captain America vs Ironman
+#Language Used by Jobfunction 
+```{r }
+newdata3 = rbind(ruser,pythonuser)
+language_jobfunction = newdata3 %>%
+  group_by(JobFunctionSelect, user) %>%
+  summarise(count = n())
+language_jobfunction_plot = ggplot(language_jobfunction, aes(x = JobFunctionSelect, y = count, group = user, fill = user)) + 
+  geom_bar(position="dodge", stat="identity")  + theme(axis.text.x = element_text(angle=10, vjust=0.5, size=4)) +
+  scale_fill_brewer(type = "seq", palette = "Accent")
+language_jobfunction_plot
+```
+
+#Python and R Comparison. Captain America vs Ironman
+# Job Tenure vs Language 
+```{r }
+
+newdata4 = rbind(ruser,pythonuser)
+language_tenure = newdata4 %>%
+  group_by(Tenure, user) %>%
+  summarise(count = n())
+language_tenure_plot = ggplot(language_tenure, aes(x = Tenure, y = count, group = user, fill = user)) + 
+  geom_bar(position="dodge", stat="identity") +
+  coord_flip()
+language_tenure_plot
+```
+
+#Python and R Comparison. Captain America vs Ironman
+# Enployment Industry vs Language
+```{r warning=FALSE}
+newdata5 = rbind(ruser,pythonuser)
+language_industry = newdata5 %>%
+  group_by(EmployerIndustry, user) %>%
+  summarise(count = n())
+language_industry_plot = ggplot(language_industry, aes(x = EmployerIndustry , y = count, group = user, fill = user)) + 
+  geom_bar(position="dodge", stat="identity") +
+  coord_flip() + scale_fill_brewer(type = "seq", palette = "set1")
+language_industry_plot
+```
+From the plots above, we can conclude that python is more popular around data scientist. 
+
+#Future Study 
+```{r }
+singlechoice2("MLToolNextYearSelect") %>% head(5)
+```
+
+#Future Study 
+```{r }
+singlechoice2("MLMethodNextYearSelect") %>% head(5)
+# 
+```
+Tensorflow is the data scientist most excited tool about learning next year. Deep learning and neural nets are the method that data scientist most excited about learning next year.
+Tensorflow is a good tool for deep learning, so we can see that data scientist have great interesting in deep learing for next year. 
+
+#Conclusion
+It is a interesting process to get insights of data scientist from Kaggle survey. Besides some basic information about data scientist, I also analyzed machine learning methods or algorithms using frequency of them and compared two main working tools, r and python, in the real world. It is obvious that data scientist is a high pay job, but require a lot of skills and knowledge. For those who want to become a data scientist or change career path to data science field, this could be a quite useful report.
+
